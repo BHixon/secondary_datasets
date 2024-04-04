@@ -699,8 +699,18 @@ PROC IMPORT DATAFILE=REFFILE
 	GETNAMES=YES;
 RUN;
 
+FILENAME REFFILE '//kpco-ihr-1.ihr.or.kp.org/Analytic_Projects_2016/2018_Ritzwoller_PROSPR_EX/Study Projects/20240312_Hixon_SDOH/data/indices/NDI_USA_2014.csv';
+
+PROC IMPORT DATAFILE=REFFILE
+	DBMS=CSV
+	OUT=WORK.ndi;
+	GETNAMES=YES;
+RUN;
+
+
 data svi_data;
 	set svi;
+		char_geo=put(FIPS, z11.);
 		if st_abbr = 'AL' then svi_fips = cats('0',FIPS);
 			else if st_abbr = 'AZ' then svi_fips = cats('0',FIPS);
 			else if st_abbr = 'AK' then svi_fips = cats('0',FIPS);
@@ -710,6 +720,16 @@ data svi_data;
 			else if st_abbr = 'CT' then svi_fips = cats('0',FIPS);
 			else svi_fips = cats(' ',FIPS);			
 run;
+
+data ndi_data;
+	set ndi;
+		char_geo=put(geoid, z11.);
+run;	
+
+proc rank data=ndi_data out=ndi_out1 groups=5;                               
+    var ndi_std;                                                          
+    ranks ndi_rank;                                                      
+run; 
 
 proc sql;
 	create table put_together as select distinct
@@ -727,13 +747,15 @@ proc sql;
 		d.first_rads,
 		d.first_ct_Date,
 		f.charlson_score,
-		g.rpl_themes as svi_score
+		g.rpl_themes as svi_score,
+		h.ndi_rank
 			from demographics a 
 			left join census b on a.studyid = b.studyid
 			left join bmi c on a.studyid = c.studyid
 			left join screening d  on a.studyid = d.studyid
 			left join charlson f on a.studyid = f.studyid
-			left join svi_data g on b.geocode = g.svi_fips 
+			left join svi_data g on b.geocode = g.char_geo 
+			left join ndi_out1 h on b.geocode = h.char_geo 
 				order by studyid;
 quit;
 
@@ -746,6 +768,11 @@ data sets.final_set;
 			else if svi_score ge 0.4 and svi_score lt 0.6 then svi_quintile = 3;
 			else if svi_score ge 0.6 and svi_score lt 0.8 then svi_quintile = 2;
 			else if svi_score ge 0.8 then svi_quintile = 1;
+	if ndi_rank =0  then  NDI =1;
+	else if ndi_rank=1 then NDI=2;
+	else if ndi_rank=2 then NDI=3;
+	else if ndi_rank=3 then NDI=4;
+	else if ndi_rank=4 then NDI=5;
 		if age14 ge 50 and age14 le 80 then age = age14;
 		else if age19 ge 50 and age19 le 80 then age = age19;
   asian=0; black=0; hawpi=0; amind=0; white=0; unkrace=0; mult=0; Othrace=0;
@@ -969,6 +996,16 @@ value yost
 5 = "Yost 5: SES High"
 ;
 
+value ndi
+. = "Missing"
+1 = "NDI 1: SES Low"
+2 = "NDI 2: SES 2"
+3 = "NDI 3: SES 3"
+4 = "NDI 4: SES 4"
+5 = "NDI 5: SES High"
+;
+
+
 value svi
 . = "Missing"
 1 = "SVI 1: SES Low"
@@ -993,15 +1030,15 @@ proc tabulate data= sets.final_set missing /*format=mask.*/;
   title 'Cancer Yield Descriptive';
   *rows;
   class age gender newrace hispanic bmi first_rads bmi  pack_years2 smoking_use_revised quit_years 
-  yost_state_quintile svi_quintile charlson_score assoc_college_plus providingsite medhousincome
+  yost_state_quintile svi_quintile charlson_score assoc_college_plus providingsite medhousincome ndi
 / order=internal
   ;
   *columns;
   format age agefmt. gender $gender.  bmi bmi.  pack_years2 pack_years. smoking_use_revised $evernever. medhousincome income.
-  quit_years quit. yost_state_quintile yost. svi_quintile svi. charlson_score charlson. assoc_college_plus edu.
+  quit_years quit. yost_state_quintile yost. ndi ndi. svi_quintile svi. charlson_score charlson. assoc_college_plus edu.
 
   ;
-  classlev age gender newrace first_rads bmi pack_years2 smoking_use_revised quit_years  
+  classlev age gender newrace first_rads bmi pack_years2 smoking_use_revised quit_years   ndi
   yost_state_quintile svi_quintile charlson_score providingsite assoc_college_plus medhousincome
 / style=data[indent=2]
   ;
@@ -1016,11 +1053,12 @@ proc tabulate data= sets.final_set missing /*format=mask.*/;
 		quit_years = 'Years Since Quit'
 		yost_state_quintile = 'Yost Index'
 		svi_quintile = 'SVI Index'
+		ndi = 'NDI Index'
 		assoc_college_plus = 'Received a Degree (Assoc. or Higher)'
 		medhousincome = 'Median Household Income'
 		charlson_score = 'Charlson Score'
 /* 		providingsite = 'Site' */
-		,providingsite*(n  colpctn='PERCENT OF TOTAL')
+		, (n  colpctn='PERCENT OF TOTAL')
     / misstext="."
   ;
 
