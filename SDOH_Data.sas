@@ -948,8 +948,9 @@ proc format;
 	.="Missing Geocode"
 	low-<1="<1% of Adults in Census Tract"
 	1-<10="1-9.99% of Adults"
-	10-<25="10-24.99% of Adults"
-	25-high="25%+ of Adults"
+	10-<20="10-19.99% of Adults"
+	20-<30="20-29.99% of Adults"
+	30-high="30%+ of Adults"
 ;
 
 	value income
@@ -1070,7 +1071,33 @@ data analytic_set;
 		else ctyn = "0";
 		if gender = 'M' then sex = 1;
 		else sex = 0;
+
+if medhousincome le 24500 then income =1;
+if medhousincome gt 24500 and medhousincome le 50000 then income = 2;
+if medhousincome gt 50000 and medhousincome le 100000 then income = 3;
+if medhousincome gt 100000 and medhousincome le 200000 then income = 4;
+if medhousincome gt 200000 then income = 5;
+
+if assoc_college_plus le 1 then education =1;
+if assoc_college_plus gt 1 and assoc_college_plus le 10 then education = 2;
+if assoc_college_plus gt 10 and assoc_college_plus le 20 then education = 3;
+if assoc_college_plus gt 20 and assoc_college_plus le 30 then education = 4;
+if assoc_college_plus gt 30 then education = 5;
+
 run;
+
+proc means data = analytic_set;
+
+	var yost_state_quintile svi_quintile education income ndi;
+quit;
+
+proc sort data = analytic_set;
+	by providingsite;
+run;
+proc means data = analytic_set;
+by providingsite;
+	var yost_state_quintile svi_quintile education income ndi;
+quit;
 
 ods graphics on;
 proc logistic data=analytic_set plots=all;
