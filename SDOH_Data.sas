@@ -101,7 +101,7 @@ proc sql;
 		b.tobacco_smoking_quit_date
 			from demog_pull a 
 				left join full.smoking_history b on a.studyid = b.studyid
-				where tobacco_smoking_use in ('C', 'Q')
+				where tobacco_smoking_use in ('C', 'Q') and b.contact_date le '31DEC2019'd
 					 order by a.studyid, b.contact_date;
 ;
 quit;
@@ -119,7 +119,7 @@ proc sql;
 		c.baseline_scan
 		from smoking_data a
 		left join full.screenings c on a.studyid = c.studyid
-				where a.providingsite in ('KPCO', 'KPHI');;
+				where a.providingsite in ('KPCO', 'KPHI');
 
 quit;
 
@@ -141,7 +141,7 @@ proc sql;
 		from smoking_data a
 		left join full.screenings c on a.studyid = c.studyid
 		left join full.acr d on a.studyid = d.studyid and c.ct_date = d.exam_date
-				where a.providingsite in ('MCRF', 'HFHS', 'PENN');;
+				where a.providingsite in ('MCRF', 'HFHS', 'PENN');
 
 quit;
 
@@ -149,10 +149,14 @@ data all_smoke;
 	set easy_smoke additional_smoke;
 run;
 
+proc sort data = all_smoke;
+	by studyid;
+run;
 
 data site_to_site_remap;	
 	set all_smoke;
 	format tobacco_smoking_quit_date2 date9.;
+	by studyid;
 		if tobacco_use_years ne '' then do;
 					use_years = input(compress(strip(tobacco_use_years),"ABCDEFGHIJKLMNOPQRSTUVWXYZ/+-"), 8.);
     			end;
@@ -204,6 +208,7 @@ data site_to_site_remap;
 			else pack_years2 = social_packyrs;
 		end;	
 		if providingsite ='KPCO' then do;
+		
 			tobacco_smoking_quit_date2 =tobacco_smoking_quit_date;
 			
 			tobacco_smoking_use2 =tobacco_smoking_use;
@@ -222,35 +227,52 @@ data site_to_site_remap;
 run;
 
 proc sql;
+	create table quitters as select 
+	*,
+	min(contact_date) as min_quit format=date9.
+	from site_to_site_remap
+	where tobacco_smoking_use2 = 'Q'
+	group by studyid
+	order by studyid, contact_date;
+quit;
+data quitters;
+	set quitters;
+		by studyid;
+			if last.studyid then output;
+run;
+	
+proc sql;
 	create table inclusion_start as select 	
-	* 		
-	,case when 
-			tobacco_smoking_use2 in ('Q', 'C') then 1
-			else 0
-		end as smoke_sum,
-		case when 
-			tobacco_smoking_use2 = 'Q' and tobacco_smoking_quit_date2 = . and (ct_date< max(tobacco_smoking_quit_date2) or max(tobacco_smoking_quit_date2) = .) then ct_date
-			 when tobacco_smoking_use2 = 'Q' and tobacco_smoking_quit_date2 =. and ct_date ge max(tobacco_smoking_quit_date2) then max(tobacco_smoking_quit_date2)
-			else tobacco_smoking_quit_date2
-		end as max_quit format=mmddyy10.,
-		case when 
-		tobacco_smoking_use2 in ('Q', 'C') then tobacco_smoking_use2
-		when tobacco_smoking_use2 in ('U','N') and tobacco_smoking_quit_date2 ne . then 'Q'
-		when tobacco_smoking_use2 in ('N', 'U') and (tobacco_smoking_quit_date2 = . and pack_years2 ne .) then 'C'
-		else tobacco_smoking_use2
-		end as smoking_use_revised
-		from site_to_site_remap
-		group by studyid;
+	a.* 		
+	, b.min_quit,
+	case 
+			when a.tobacco_smoking_use2 = 'Q' and a.tobacco_smoking_quit_date2 = . and (a.ct_date< max(a.tobacco_smoking_quit_date2) or max(a.tobacco_smoking_quit_date2) = .) then a.ct_date
+			when a.tobacco_smoking_use2 = 'Q' and a.tobacco_smoking_quit_date2 = . and a.ct_date ge max(a.tobacco_smoking_quit_date2) then max(a.tobacco_smoking_quit_date2)
+			when a.tobacco_smoking_use2 = 'Q' and a.tobacco_smoking_quit_date2 = . then a.contact_date		
+			else a.tobacco_smoking_quit_date2
+		end as max_quit format=date9.,
+	case when 
+		a.tobacco_smoking_use2 in ('Q', 'C') then a.tobacco_smoking_use2
+		when a.tobacco_smoking_use2 in ('U','N') and a.tobacco_smoking_quit_date2 ne . then 'Q'
+		when a.tobacco_smoking_use2 in ('N', 'U') and (a.tobacco_smoking_quit_date2 = . and a.pack_years2 ne .) then 'C'
+		else a.tobacco_smoking_use2
+	end as smoking_use_revised
+		from site_to_site_remap a
+		left join quitters b on a.studyid = b.studyid
+			group by a.studyid;
 quit;
 
 data inclusion_start2;
 	set inclusion_start;
 		by studyid ;
-     			if  max_quit le ct_date and smoking_use_revised = 'Q' then 
-     				quit_years = floor((intck('month',max_quit, '01JAN2014'd) - (day('01JAN2014'd) < day(max_quit))) / 12);
-     				else 
-     				quit_years = .;
+     			if  max_quit  ne . and smoking_use_revised = 'Q' then
+     				quit_years = floor((intck('month',max_quit, '31DEC2019'd) - (day('31DEC2019'd) < day(max_quit))) / 12);
+     			else if	max_quit  = . and smoking_use_revised = 'Q' and min_quit ne . then
+     				quit_years = floor((intck('month',min_quit, '31DEC2019'd) - (day('31DEC2019'd) < day(min_quit))) / 12);
+     		else if smoking_use_revised = 'Q' then
+     				quit_years = floor((intck('month',contact_date, '31DEC2019'd) - (day('31DEC2019'd) < day(contact_date))) / 12);
 run;
+
 
 proc sql;
 title 'Total LOTUS population';
@@ -283,8 +305,7 @@ quit;
 
 proc sql;
 	create table inclusion_start3 as
-		select *, 
-		sum(smoke_sum) as ever_smoker
+		select *
 	from inclusion_start2
 			group by studyid
 			order by studyid, contact_date;
@@ -299,7 +320,7 @@ run;
 	
 /*Strict Criteria*/
 
-data inclusion_strict nope;
+data sets.inclusion_strict nope;
 	set inclusion_start4;
 
      			if quit_years lt 0 then quit_years = .;
@@ -317,14 +338,14 @@ data inclusion_strict nope;
 				if ic3 = 1 and ic2 = 1 and ic1 = 1 then LCS_ELG = 'Y'; 
 				else LCS_ELG = 'N';
 
-if lcs_elg='Y' then output inclusion_strict;
+if lcs_elg='Y' then output sets.inclusion_strict;
 else output nope;
 run;
 
 proc sql;
 title 'Strict LCS Eligible only population';
 	select count(distinct studyid), providingsite
-	from inclusion_strict
+	from sets.inclusion_strict
     	group by providingsite;
 quit;
 title;
@@ -332,7 +353,7 @@ title;
 proc sql;
 title 'Strict LCS Eligible only population';
 	select count(distinct studyid) into:water3
-	from inclusion_strict;
+	from sets.inclusion_strict;
 quit;
 title;
 
@@ -351,7 +372,7 @@ Anyone who's baseline ldct was not within an engagement period (allow 90 day gap
 No lung cancer and death within 12 months of baseline
 */
 
-%let strict_loose = inclusion_strict;
+%let strict_loose = sets.inclusion_strict;
 
 data last_record;
 	set &strict_loose;
@@ -407,7 +428,7 @@ run;
 proc sql;
 title 'Strict LCS Eligible only population with no prior history of lung cancer';
 	select count(distinct studyid) into:water4
-	from inclusion_strict;
+	from exclude_start2;
 quit;
 title;
 
@@ -627,7 +648,7 @@ proc sql;
 	create table census as select distinct
 		a.studyid,
 		b.geocode,
-		c.yost_state_quintile,
+		c.yost_overall_quintile,
 		c.educ_somecoll,
 		c.educ_assocdeg,
 		c.educ_bachdeg,
@@ -673,7 +694,7 @@ proc sql;
 		b.charlson_score
 			from sets.sdoh_set a
 			left join full.comorbidity b on a.studyid = b.studyid 
-				where year = 2014
+				where year between 2014 and 2019
 				order by studyid, year;
 quit;
 
@@ -727,7 +748,7 @@ data ndi_data;
 run;	
 
 proc rank data=ndi_data out=ndi_out1 groups=5;                               
-    var ndi_std;                                                          
+    var ndi_raw;                                                          
     ranks ndi_rank;                                                      
 run; 
 
@@ -735,7 +756,7 @@ proc sql;
 	create table put_together as select distinct
 		a.*,
 		b.geocode,
-		b.yost_state_quintile,
+		b.yost_overall_quintile,
 		b.educ_somecoll,
 		b.educ_assocdeg,
 		b.educ_bachdeg,
@@ -762,30 +783,34 @@ quit;
 data sets.final_set;
 	set put_together;
 		by studyid;
-		if geocode = ' ' then delete;
-		if svi_score lt 0.2 then svi_quintile = 5;
-			else if svi_score ge 0.2 and svi_score lt 0.4 then svi_quintile = 4;
-			else if svi_score ge 0.4 and svi_score lt 0.6 then svi_quintile = 3;
-			else if svi_score ge 0.6 and svi_score lt 0.8 then svi_quintile = 2;
-			else if svi_score ge 0.8 then svi_quintile = 1;
-	if ndi_rank =0  then  NDI =1;
-	else if ndi_rank=1 then NDI=2;
-	else if ndi_rank=2 then NDI=3;
-	else if ndi_rank=3 then NDI=4;
-	else if ndi_rank=4 then NDI=5;
+		if yost_overall_quintile = 5 then yost = 1; /*High SES Status*/
+			else if yost_overall_quintile = 4 then yost = 2;
+			else if yost_overall_quintile = 3 then yost = 3;
+			else if yost_overall_quintile = 2 then yost = 4;
+			else if yost_overall_quintile = 1 then yost = 5; /*Low SES Status*/
+		if svi_score lt 0.2 then svi = 1; /*High SES Status*/
+			else if svi_score ge 0.2 and svi_score lt 0.4 then svi = 2;
+			else if svi_score ge 0.4 and svi_score lt 0.6 then svi = 3;
+			else if svi_score ge 0.6 and svi_score lt 0.8 then svi = 4;
+			else if svi_score ge 0.8 then svi = 5;/*Low SES Status*/
+		if ndi_rank =0  then  ndi =1; /*High SES Status*/
+			else if ndi_rank=1 then ndi=2;
+			else if ndi_rank=2 then ndi=3;
+			else if ndi_rank=3 then ndi=4;
+			else if ndi_rank=4 then ndi=5;/*Low SES Status*/
 		if age14 ge 50 and age14 le 80 then age = age14;
-		else if age19 ge 50 and age19 le 80 then age = age19;
-  asian=0; black=0; hawpi=0; amind=0; white=0; unkrace=0; mult=0; Othrace=0;
-  Asian = whichc('AS', of race:)>0;
-  Black = whichc('BA', of race:)>0;
-  HawPI = whichc('HP', of race:)>0;
-  AmInd = whichc('IN', of race:)>0;
-  White = whichc('WH', of race:)>0;
-  Mult  = whichc('MU', of race:)>0;
-  Othrace=whichc('OT', of race:)>0;
-  if race1='UN' and race2='UN' and race3='UN' and race4='UN' and race5='UN' then unkrace=1;
-  multsum=sum(asian,black,hawpi,amind,white,othrace);
-  if hawpi=1 then newrace='HawPI';
+			else if age19 ge 50 and age19 le 80 then age = age19;
+		  asian=0; black=0; hawpi=0; amind=0; white=0; unkrace=0; mult=0; Othrace=0;
+		  Asian = whichc('AS', of race:)>0;
+		  Black = whichc('BA', of race:)>0;
+		  HawPI = whichc('HP', of race:)>0;
+		  AmInd = whichc('IN', of race:)>0;
+		  White = whichc('WH', of race:)>0;
+		  Mult  = whichc('MU', of race:)>0;
+		  Othrace=whichc('OT', of race:)>0;
+		  if race1='UN' and race2='UN' and race3='UN' and race4='UN' and race5='UN' then unkrace=1;
+ 		 multsum=sum(asian,black,hawpi,amind,white,othrace);
+ 		 if hawpi=1 then newrace='HawPI';
   else if amind=1 then newrace='AmInd';
   else if Hispanic = 'Y' then newrace ='Hisp';
   else if mult=1 then newrace='Mult';
@@ -796,7 +821,23 @@ data sets.final_set;
   else if othrace=1 then newrace='Other';
   else if unkrace=1 then newrace='Unk';
   else newrace='???'; 
+  
+  
   assoc_college_plus= educ_assocdeg + educ_bachdeg + educ_mastprofdeg + educ_doctdeg;
+  
+  if medhousincome le 28000 then income =5;
+if medhousincome gt 28000 and medhousincome le 56000 then income = 4;
+if medhousincome gt 56000 and medhousincome le 83000 then income = 3;
+if medhousincome gt 83000 and medhousincome le 111000 then income = 2;
+if medhousincome gt 111000 then income = 1;
+
+if assoc_college_plus le 20 then education =5;
+if assoc_college_plus gt 20 and assoc_college_plus le 40 then education = 4;
+if assoc_college_plus gt 40 and assoc_college_plus le 60 then education = 3;
+if assoc_college_plus gt 60 and assoc_college_plus le 80 then education = 2;
+if assoc_college_plus gt 80 then education = 1;
+
+  if geocode = ' ' or NDI = . or svi = . or svi = -999 or medhousincome = . or assoc_college_plus = . or yost_overall_quintile = . then delete;
   drop hawpi amind mult multsum asian black white othrace unkrace;  
 	
 run;
@@ -946,20 +987,20 @@ proc format;
 
 	value edu
 	.="Missing Geocode"
-	low-<1="<1% of Adults in Census Tract"
-	1-<10="1-9.99% of Adults"
-	10-<20="10-19.99% of Adults"
-	20-<30="20-29.99% of Adults"
-	30-high="30%+ of Adults"
+	low-<20="<20% of Adults in Census Tract"
+	20-<40="20-39.99% of Adults"
+	40-<60="40-59.99% of Adults"
+	60-<80="60-79.99% of Adults"
+	80-high="80%+ of Adults"
 ;
 
 	value income
 	.="Missing Geocode"
-	low-24500="<= $24,500 (approx. US poverty threshold for family of 4 in 2015)"
-	24501-50000="$24,501-$50,000"
-	50001-100000="$50,001-$100,000"
-	100001-200000="$100,001-$200,000"
-	200001-high=">200,000"
+	low-28000="<= $28,000 (approx. US poverty threshold for family of 4 in 2019)"
+	28001-56000="$28,001-$56,000"
+	56001-83000="$56,001-$83,000"
+	83001-111000="$83,001-$111,000"
+	111001-high=">$111,000"
 ;
 
   value $ marry
@@ -990,30 +1031,30 @@ proc format;
 
 value yost
 . = "Missing"
-1 = "Yost 1: SES Low"
+1 = "Yost 1: SES High"
 2 = "Yost 2: SES 2"
 3 = "Yost 3: SES 3"
 4 = "Yost 4: SES 4"
-5 = "Yost 5: SES High"
+5 = "Yost 5: SES Low"
 ;
 
 value ndi
 . = "Missing"
-1 = "NDI 1: SES Low"
+1 = "NDI 1: SES High"
 2 = "NDI 2: SES 2"
 3 = "NDI 3: SES 3"
 4 = "NDI 4: SES 4"
-5 = "NDI 5: SES High"
+5 = "NDI 5: SES Low"
 ;
 
 
 value svi
 . = "Missing"
-1 = "SVI 1: SES Low"
+1 = "SVI 1: SES High"
 2 = "SVI 2: SES 2"
 3 = "SVI 3: SES 3"
 4 = "SVI 4: SES 4"
-5 = "SVI 5: SES High"
+5 = "SVI 5: SES Low"
 ;
 
 value charlson
@@ -1030,40 +1071,41 @@ quit;
 proc tabulate data= sets.final_set missing /*format=mask.*/;
   title 'Cancer Yield Descriptive';
   *rows;
-  class age gender newrace hispanic bmi first_rads bmi  pack_years2 smoking_use_revised quit_years 
-  yost_state_quintile svi_quintile charlson_score assoc_college_plus providingsite medhousincome ndi
+  class age gender newrace hispanic bmi first_rads bmi  pack_years2 smoking_use_revised quit_years marital_status
+  yost svi charlson_score assoc_college_plus providingsite medhousincome ndi
 / order=internal
   ;
   *columns;
   format age agefmt. gender $gender.  bmi bmi.  pack_years2 pack_years. smoking_use_revised $evernever. medhousincome income.
-  quit_years quit. yost_state_quintile yost. ndi ndi. svi_quintile svi. charlson_score charlson. assoc_college_plus edu.
-
+  quit_years quit. yost yost. ndi ndi. svi svi. charlson_score charlson. assoc_college_plus edu. marital_status $marry.
+ 
   ;
-  classlev age gender newrace first_rads bmi pack_years2 smoking_use_revised quit_years   ndi
-  yost_state_quintile svi_quintile charlson_score providingsite assoc_college_plus medhousincome
+  classlev age gender newrace first_rads bmi pack_years2 smoking_use_revised quit_years ndi marital_status
+  yost svi charlson_score providingsite assoc_college_plus medhousincome
 / style=data[indent=2]
   ;
   table all
 		age="Age as of Cohort Entry."
 		gender='Sex'
 		newrace='Race'
-		first_rads = 'Baseline Lung Rads'
 		bmi = 'Body Mass Index'
 		pack_years2 = 'Pack Years'
 		smoking_use_revised = 'Current or Former Smoker'
 		quit_years = 'Years Since Quit'
-		yost_state_quintile = 'Yost Index'
-		svi_quintile = 'SVI Index'
+		marital_status = 'Marital Status'
+		charlson_score = 'Charlson Score'
+		yost = 'Yost Index'
+		svi = 'SVI Index'
 		ndi = 'NDI Index'
 		assoc_college_plus = 'Received a Degree (Assoc. or Higher)'
 		medhousincome = 'Median Household Income'
-		charlson_score = 'Charlson Score'
 /* 		providingsite = 'Site' */
 		, (n  colpctn='PERCENT OF TOTAL')
     / misstext="."
   ;
 
 run;
+
 
 data analytic_set;
 	set sets.final_set;
@@ -1072,23 +1114,11 @@ data analytic_set;
 		if gender = 'M' then sex = 1;
 		else sex = 0;
 
-if medhousincome le 24500 then income =1;
-if medhousincome gt 24500 and medhousincome le 50000 then income = 2;
-if medhousincome gt 50000 and medhousincome le 100000 then income = 3;
-if medhousincome gt 100000 and medhousincome le 200000 then income = 4;
-if medhousincome gt 200000 then income = 5;
-
-if assoc_college_plus le 1 then education =1;
-if assoc_college_plus gt 1 and assoc_college_plus le 10 then education = 2;
-if assoc_college_plus gt 10 and assoc_college_plus le 20 then education = 3;
-if assoc_college_plus gt 20 and assoc_college_plus le 30 then education = 4;
-if assoc_college_plus gt 30 then education = 5;
-
 run;
 
 proc means data = analytic_set;
 
-	var yost_state_quintile svi_quintile education income ndi;
+	var yost svi education income ndi;
 quit;
 
 proc sort data = analytic_set;
@@ -1096,29 +1126,80 @@ proc sort data = analytic_set;
 run;
 proc means data = analytic_set;
 by providingsite;
-	var yost_state_quintile svi_quintile education income ndi;
+	var yost svi education income ndi;
 quit;
 
 ods graphics on;
-proc logistic data=analytic_set plots=all;
-class ctyn(ref="0") gender/ param=glm;
-   model ctyn=yost_state_quintile age sex;
+proc logistic data=analytic_set;
+title 'Crude Yost';
+class ctyn(ref="0") yost (ref="5")/ param=glm;
+   model ctyn=yost / rsq lackfit;
+      score fitstat;
+run;
+ods graphics on;
+proc logistic data=analytic_set;
+title 'Replication Yost';
+class ctyn(ref="0") newrace yost (ref="5")/ param=glm;
+   model ctyn=yost age sex newrace charlson_score/ rsq lackfit;
+      score fitstat;
 run;
 
 ods graphics on;
-proc logistic data=analytic_set plots=all;
-class ctyn(ref="0") / param=glm;
-   model ctyn=svi_quintile age;
+proc logistic data=analytic_set;
+title 'Crude NDI';
+class ctyn(ref="0") ndi (ref="5")/ param=glm;
+   model ctyn=ndi/ rsq lackfit;
+         score fitstat;
+run;
+ods graphics on;
+proc logistic data=analytic_set;
+title 'Replication NDI';
+class ctyn(ref="0") newrace ndi (ref="5")/ param=glm;
+   model ctyn=ndi age sex newrace charlson_score/ rsq lackfit;
+         score fitstat;
 run;
 
 ods graphics on;
-proc logistic data=analytic_set plots=all;
-class ctyn(ref="0") / param=glm;
-   model ctyn=assoc_college_plus age;
+proc logistic data=analytic_set;
+title 'Crude SVI';
+class ctyn(ref="0") svi (ref="5")/ param=glm;
+   model ctyn=svi/ rsq lackfit;
+            score fitstat;
+run;
+ods graphics on;
+proc logistic data=analytic_set;
+title 'Replication SVI';
+class ctyn(ref="0") newrace svi (ref="5")/ param=glm;
+   model ctyn=svi age sex newrace charlson_score/ rsq lackfit;
+            score fitstat;
 run;
 
 ods graphics on;
-proc logistic data=analytic_set plots=all;
-class ctyn(ref="0") / param=glm;
-   model ctyn=medhousincome age;
+proc logistic data=analytic_set;
+title 'Crude Education';
+class ctyn(ref="0") education (ref="5")/ param=glm;
+   model ctyn=education/ rsq lackfit;
+               score fitstat;
+run;
+ods graphics on;
+proc logistic data=analytic_set;
+title 'Replication Education';
+class ctyn(ref="0") newrace education (ref="5")/ param=glm;
+   model ctyn=education age sex newrace charlson_score/ rsq lackfit;
+   score fitstat;
+run;
+
+ods graphics on;
+proc logistic data=analytic_set;
+title 'Crude Median Income';
+class ctyn(ref="0") income (ref="5")/ param=glm;
+   model ctyn=income/ rsq lackfit;
+      score fitstat;
+run;
+ods graphics on;
+proc logistic data=analytic_set;
+title 'Replication Income';
+class ctyn(ref="0") newrace income (ref="5")/ param=glm;
+   model ctyn=income age sex newrace charlson_score/ rsq lackfit;
+      score fitstat;
 run;

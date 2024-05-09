@@ -178,8 +178,8 @@ full_dataset <- geo_join(combineddataset,
 
 # create color palette 
 pal1 <- colorNumeric(
-  palette = "Reds",
-  domain = full_dataset$svi_quintile)
+  palette = "plasma",
+  domain = full_dataset$svi)
 
 # create labels for zipcodes
 labels1 <- 
@@ -187,7 +187,7 @@ labels1 <-
     "GEOCODE: ",
     full_dataset$geocode, "<br/>",
     "SVI: ",
-    full_dataset$svi_quintile) %>%
+    full_dataset$svi) %>%
   lapply(htmltools::HTML)
 
 mapsvi<-leaflet(full_dataset) %>%
@@ -197,23 +197,24 @@ mapsvi<-leaflet(full_dataset) %>%
   
   addPolygons(color = "#444444", weight = 1, smoothFactor = 0.5,
               opacity = 1.0, fillOpacity = 0.5,
-              fillColor = ~pal1(svi_quintile),
+              fillColor = ~pal1(svi),
               group="SVI",
               highlightOptions = highlightOptions(color = "green", weight = 2,
                                                   bringToFront = TRUE),label = labels1) %>%
   
   addLegend(pal = pal1, 
-            values = ~svi_quintile, 
+            values = ~svi, 
             opacity = 0.7, 
             group="SVI",
             title = htmltools::HTML("SVI Quintile"),
             position = "bottomleft")
 
+mapsvi
 #############################################################
 ################ NDI ########################################
 # create color palette 
 pal2 <- colorNumeric(
-  palette = "Greens",
+  palette = "plasma",
   domain = full_dataset$ndi)
 
 # create labels for zipcodes
@@ -243,21 +244,21 @@ mapndi<-leaflet(full_dataset) %>%
             group="NDI",
             title = htmltools::HTML("NDI Quintile"),
             position = "bottomleft")
-
+mapndi
 #############################################################
 ################ YOST #######################################
 # create color palette 
 pal3 <- colorNumeric(
-  palette = "Blues",
-  domain = full_dataset$yost_state_quintile)
+  palette = "plasma",
+  domain = full_dataset$yost)
 
 # create labels for zipcodes
 labels3 <- 
   paste0(
     "GEOCODE: ",
     full_dataset$geocode, "<br/>",
-    "SVI: ",
-    full_dataset$yost_state_quintile) %>%
+    "Yost: ",
+    full_dataset$yost) %>%
   lapply(htmltools::HTML)
 
 mapyost<-leaflet(full_dataset) %>%
@@ -267,25 +268,28 @@ mapyost<-leaflet(full_dataset) %>%
   
   addPolygons(color = "#444444", weight = 1, smoothFactor = 0.5,
               opacity = 1.0, fillOpacity = 0.5,
-              fillColor = ~pal3(yost_state_quintile),
+              fillColor = ~pal3(yost),
               group="Yost",
               highlightOptions = highlightOptions(color = "green", weight = 2,
                                                   bringToFront = TRUE),label = labels3) %>%
   
   addLegend(pal = pal3, 
-            values = ~yost_state_quintile, 
+            values = ~yost, 
             opacity = 0.7, 
             group="Yost",
             title = htmltools::HTML("Yost Quintile"),
             position = "bottomleft")
 
-
+mapyost
 
 #############################################################
 ################ Education ##################################
 # create color palette 
 
-pal4 <- colorQuantile(palette = "viridis", domain = colo_pop$assoc_college_plus, n = 5)
+pal4 <- colorNumeric(
+  palette = "plasma",
+  domain = full_dataset$education)
+
 
 # create labels for zipcodes
 labels4 <- 
@@ -293,7 +297,7 @@ labels4 <-
     "GEOCODE: ",
     full_dataset$geocode, "<br/>",
     "Education: ",
-    full_dataset$assoc_college_plus) %>%
+    full_dataset$education) %>%
   lapply(htmltools::HTML)
 
 mapedu<-leaflet(full_dataset) %>%
@@ -303,13 +307,13 @@ mapedu<-leaflet(full_dataset) %>%
   
   addPolygons(color = "#444444", weight = 1, smoothFactor = 0.5,
               opacity = 1.0, fillOpacity = 0.5,
-              fillColor = ~pal4(assoc_college_plus),
+              fillColor = ~pal4(education),
               group="Education",
               highlightOptions = highlightOptions(color = "green", weight = 2,
                                                   bringToFront = TRUE),label = labels4) %>%
   
   addLegend(pal = pal4, 
-            values = ~assoc_college_plus, 
+            values = ~education, 
             opacity = 0.7, 
             group="Education",
             title = htmltools::HTML("Education Quintile"),
@@ -319,15 +323,18 @@ mapedu
 #############################################################
 ################ Income #####################################
 # create color palette 
-pal5 <- colorQuantile(palette = "viridis", domain = colo_pop$medhousincome, n = 5)
+pal5 <- colorNumeric(
+  palette = "plasma",
+  domain = full_dataset$income)
+
 
 # create labels for zipcodes
-labels3 <- 
+labels5 <- 
   paste0(
     "GEOCODE: ",
     full_dataset$geocode, "<br/>",
     "Income: ",
-    full_dataset$medhousincome) %>%
+    full_dataset$income) %>%
   lapply(htmltools::HTML)
 
 mapinc<-leaflet(full_dataset) %>%
@@ -337,15 +344,16 @@ mapinc<-leaflet(full_dataset) %>%
   
   addPolygons(color = "#444444", weight = 1, smoothFactor = 0.5,
               opacity = 1.0, fillOpacity = 0.5,
-              fillColor = ~pal5(medhousincome),
-              group="Yost",
+              fillColor = ~pal5(income),
+              group="Income",
               highlightOptions = highlightOptions(color = "green", weight = 2,
                                                   bringToFront = TRUE),label = labels5) %>%
   
   addLegend(pal = pal5, 
-            values = ~medhousincome, 
+            values = ~income, 
             opacity = 0.7, 
             group="Income",
             title = htmltools::HTML("Income Quintile"),
             position = "bottomleft")
 
+mapinc
